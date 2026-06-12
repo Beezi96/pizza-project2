@@ -27,7 +27,7 @@ class OrderItemFactory extends Factory
             'order_id' => Order::factory(),
             'product_id' => $product->id,
             'product_name' => $product->name,
-            'product_img' => $product->img ?? null,
+            'product_img' => $product->img ?? '',
             'product_description' => $product->description,
 
 

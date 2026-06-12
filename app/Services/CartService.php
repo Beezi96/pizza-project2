@@ -1,27 +1,15 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Services;
 
-use App\Http\Controllers\Controller;
 use App\Models\CartItem;
 use App\Models\Product;
-use App\Models\User;
-use App\Services\CartService;
-use Illuminate\Http\Request;
 
-class CartController extends Controller
+class CartService
 {
-    private $cartService;
-
-    public function __construct(CartService $cartService)
-    {
-        $this->cartService = $cartService;
-    }
-    // Константы лимитов
     private const PIZZA_LIMIT = 10;
     private const DRINK_LIMIT = 20;
 
-    // Поиск у пользователя конкрутный товар в корзине
     private function findUserCartItem($userId, $productId)
     {
         return CartItem::query()
@@ -30,10 +18,9 @@ class CartController extends Controller
             ->first(); // Возращаем первую найденную запись
     }
 
-    // Если у пользователя станет таоке кол-во товаров, не привысит ли корзина лимиты?
     private function validateCartLimits($userId, $targetProduct, $targetQuantity)
     {
-        // Шаг 1. Загружаем корзину
+        // Шаг 1. Загружаем корзину пользователя
         $cartItems = CartItem::query()
             ->with('product.category') // подгружаем товары и категории товара
             ->where('user_id', $userId)
@@ -44,7 +31,7 @@ class CartController extends Controller
         $drinkCount = 0; // Сколько всего напитков будет в корзине
         $targetProductExists = false; // Есть ли уже в корзине именно тот товар, который мы сейчас меняем
 
-        // Шаг 3. Проходим по корзине
+        // Шаг 3. Проходим по всем товарам в корзине
         foreach ($cartItems as $cartItem) { // берем каждую запись корзины
             // Шаг 4. Берем текущее кол-во
             $quantity = $cartItem->quantity;
@@ -66,6 +53,7 @@ class CartController extends Controller
             }
         }
         // Шаг 8. Если товар еще не было в корзине
+        // добавляем его кол-во к нужной категории
         if ($targetProductExists) {
             if ($targetProduct->category->code === 'pizza') {
                 $pizzaCount += $targetQuantity;
@@ -94,88 +82,53 @@ class CartController extends Controller
 
     }
 
-    // Показать корзину пользователя
-    public function index(Request $request)
+    public function getUserCartItems($userId)
     {
-        $user = auth()->user();
-
-        // Получаем корзину пользователя через сервис
-        $items = $this->cartService->getUserCartItems($user->id);
-
-        // возращаем JSON
-        return response()->json([
-            'message' => 'Users cart',
-            'data' => $items,
-        ]);
+        // Здесь лежит запрос к БД
+        return CartItem::query()
+            ->with(['product.category']) // подгружаем товары и категории
+            ->where('user_id', $userId)
+            ->get();
     }
 
-    // Добавить товар в корзину
-    public function store(Request $request)
+    public function addProductToCart($userId, $productId, $quantity)
     {
-        $user = auth()->user();
-
-        // Валидация входных данных
-        $data = $request->validate([
-            'product_id' => ['required', 'integer', 'exists:products,id'],
-            'quantity' => ['required', 'integer', 'min:1'],
-        ]);
-
-
-        return $this->cartService->addProductToCart($user, $data['product_id'], $data['quantity']);
-    }
-
-    public function update(Request $request, $product_id)
-    {
-        $user = auth()->user();
-
-        // Валидируем новое quantity
-        $data = $request->validate([
-            'quantity' => ['required', 'integer', 'min:1'],
-        ]);
-        // Находим товар по product_id
+        // 1. Ищем товар, который хотят добавить
         $product = Product::query()
             ->with('category')
-            ->find($product_id);
-        // Ищем этот товар в корзине пользователя
-        $item = $this->findUserCartItem($user->id, $product->id);
-        // Если нет - 404
-        if (!$item) {
-            return response()->json([
-                'message' => 'Cart not found.',
-            ], 404);
+            ->find($productId);
+
+        // 2. Проверяем такой товар в корзине
+        $item = $this->findUserCartItem($userId, $product->id);
+
+        // 3. Считаем новое кол-во
+        // Если товара еще нет в корзине, берем кол-во из запроса
+        $newQuantity = $quantity;
+
+        // Если товар уже был в корзине, прибовляем новое кол-во к старому
+        if ($item) {
+            $newQuantity = $item->quantity + $quantity;
         }
-        // Проверяем лимиты
-        $limitError = $this->validateCartLimits($user->id, $product, $data['quantity']);
+
+        // 4. Проверяем лимиты корзины
+        $limitError = $this->validateCartLimits($userId, $product, $newQuantity);
+
         if ($limitError) {
             return $limitError;
         }
-        // Обновляем кол-во
-        $item->quantity = $data['quantity'];
+
+
+        if (!$item) {
+            $item = new CartItem();
+            $item->user_id = $userId;
+            $item->product_id = $product->id;
+        }
+
+        $item->quantity = $newQuantity;
         $item->save();
 
         return response()->json([
             'data' => $item->load('product.category'),
-        ]);
-
-    }
-
-    public function destroy(Request $request, $product_id)
-    {
-        $user = auth()->user();
-
-        // Ищем товар в корзине пользователя по product_id
-        $item = $this->findUserCartItem($user->id, $product_id);
-        // Если нет - 404
-        if (!$item) {
-            return response()->json([
-                'message' => 'Cart item not found.',
-            ], 404);
-        }
-
-        // Если есть - удаляем
-        $item->delete();
-        return response()->json([
-            'message' => 'Deleted',
-        ]);
+        ], 201);
     }
 }

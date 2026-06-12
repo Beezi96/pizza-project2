@@ -27,8 +27,8 @@ class StatusFactory extends Factory
     public function news(): static
     {
         return $this->state(fn (array $attributes) => [
-            'name' => 'new',
-            'code' => 'Новый',
+            'name' => 'Новый',
+            'code' => 'new',
         ]);
     }
 }
